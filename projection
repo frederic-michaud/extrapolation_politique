@@ -1,0 +1,56 @@
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+from matplotlib import colors as mcolors
+import plotly.graph_objs as go
+import plotly.express as px
+import pandas as pd
+import numpy as np
+import scipy.optimize
+
+df_voix_premier_tour = pd.read_csv('../data/voix_par_commune.csv', sep = ';')
+df_voix_deuxieme_tour = pd.read_csv('../data/data_deuxieme_tour_3.csv', sep = ';')
+commune_deuxieme_tour = list(df_voix_deuxieme_tour['Commune'])
+def get_index(commune):
+    return np.where(df_voix_premier_tour['Commune'] == commune)[0][0]
+index_commune_deuxieme_tour = [get_index(commune) for commune in commune_deuxieme_tour]
+candidates = df_voix_premier_tour.columns[9:]
+index_candidat = [0, 3, 5, 9, 10, 19, 22, 24]
+candidates_deuxieme_tour = candidates[index_candidat]
+
+mat_voix_premier_tour = np.array(df_voix_premier_tour.iloc[:, 9:])
+nb_candidat_premier_tour = mat_voix_premier_tour.shape[1]
+mat_voix_deuxieme_tour = np.array(df_voix_deuxieme_tour.iloc[:, 9:])
+
+def Delta(transition_matrix, index_candidat):
+    extrapolation = np.dot(mat_voix_premier_tour[index_commune_deuxieme_tour,:], transition_matrix)
+    return np.sum(np.square(extrapolation - mat_voix_deuxieme_tour[:, index_candidat]))
+
+extrapolations = []
+mat_extra = []
+for index_candidat in range(0,8):
+    x_init = np.zeros(nb_candidat_premier_tour)
+    x_init[0] = 1
+    result = scipy.optimize.minimize(Delta, x_init, args = index_candidat)
+    mat_extra.append(result.x)
+    mat_premier_tour_missing_only = np.delete(mat_voix_premier_tour, index_commune_deuxieme_tour, 0)
+    extrapolation = np.dot(mat_premier_tour_missing_only, result.x)
+    sum_voix_extrapolation = np.sum(extrapolation, axis = 0)
+    extrapolations.append(int(sum_voix_extrapolation))
+extrapolations = np.array(extrapolations)
+print(extrapolations)
+sum_voix_confirmed = np.sum(mat_voix_deuxieme_tour, axis = 0)
+print(sum_voix_confirmed)
+total =extrapolations + sum_voix_confirmed
+print(total)
+df_final = pd.DataFrame(np.array(np.array([sum_voix_confirmed, extrapolations])).T,
+                        index=candidates_deuxieme_tour,
+                        columns=['Confirmed', 'Extrapolation']
+                        )
+df_final.index.name = "Candidats"
+print(df_final.index)
+text = list(sum_voix_confirmed) + [f'{x[0]} \n Total = {x[1]}' for x in zip(extrapolations, total)]
+df_to_plot = df_final.melt([], ignore_index=False)
+fig = px.bar(df_to_plot.reset_index(), x="Candidats", y="value", color="variable", text=text)
+fig.update_layout(barmode='stack', xaxis={'categoryorder':'total descending'})
+fig.show()
